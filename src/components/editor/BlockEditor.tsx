@@ -13,6 +13,7 @@ import Quote from '@cychann/editorjs-quote';
 import ToggleBlock from 'editorjs-toggle-block';
 import DragDrop from 'editorjs-drag-drop';
 import Undo from 'editorjs-undo';
+import CodeTool from '@editorjs/code';
 
 type BlockEditorProps = {
   data: any;
@@ -190,6 +191,7 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
             ),
           },
         },
+        code: CodeTool,
         color: {
           class: ColorPicker,
           config: {
