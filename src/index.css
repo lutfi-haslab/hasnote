@@ -1,0 +1,83 @@
+/* styles/globals.css */
+
+@tailwind base;
+
+@layer base {
+  h1 {
+    @apply text-3xl;
+  }
+  h2 {
+    @apply text-2xl;
+  }
+  h3 {
+    @apply text-xl;
+  }
+  h3 {
+    @apply text-lg;
+  }
+
+  .ce-block__content {
+    @apply flex hover:text-red-500;
+  }
+}
+
+@tailwind components;
+@tailwind utilities;
+
+/* 🔥 Global overrides go OUTSIDE any @layer block */
+.ce-block__content,
+.ce-toolbar__content {
+  max-width: unset;
+}
+
+.cdx-block {
+  max-width: 100% !important;
+}
+
+.editorjs-container .codex-editor {
+  padding: 0 !important;
+  max-width: 100%;
+}
+
+.editorjs-container .ce-block {
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 100%;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.editorjs-container .ce-toolbar {
+  left: 0 !important;
+}
+
+.toggle-block__selector {
+  display: flex;
+  align-items: center;
+  gap: 8px; /* optional: adds space between icon and text */
+}
+
+.toggle-block__icon {
+  flex-shrink: 0;
+}
+
+.toggle-block__input {
+  flex-grow: 1;
+}
+
+/* ✅ Custom styles that benefit from Tailwind can go inside @layer */
+@layer components {
+  [aria-pressed='true'] {
+    background-color: #f8fafc;
+    box-shadow: 0 0 0 2px #60a5fa;
+    opacity: 0.9;
+  }
+
+  [data-draggable='true'] {
+    cursor: grab;
+  }
+
+  [data-draggable='true']:active {
+    cursor: grabbing;
+  }
+}

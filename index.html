@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/ic_favicon.png" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>HasNote - Notes & To-Do App</title>
+    <meta
+      name="description"
+      content="A HasNote note-taking and to-do list application"
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="apple-touch-icon" href="/ic_favicon.png" sizes="180x180" />
+    <link rel="mask-icon" href="/ic_favicon.png" color="#FFFFFF" />
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' });
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
