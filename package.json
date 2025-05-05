@@ -62,5 +62,8 @@
     "workbox-precaching": "^7.0.0",
     "workbox-routing": "^7.0.0",
     "workbox-strategies": "^7.0.0"
+  },
+  "resolutions": {
+    "rollup": "npm:@rollup/wasm-node@*"
   }
 }
