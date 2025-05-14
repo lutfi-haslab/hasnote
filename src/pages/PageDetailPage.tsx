@@ -31,7 +31,7 @@ const PageDetailPage: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(true);
-  const [isAutoSave, setIsAutoSave] = useState(true);
+  const [isAutoSave, setIsAutoSave] = useState(false);
   const [isSavingContent, setIsSavingContent] = useState(false); // For manual save spinner
 
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
