@@ -65,11 +65,18 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
   const editInputRef = useRef<HTMLInputElement>(null);
   const editNotesAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  const formatContent = (content: any) =>
-    typeof content === 'object' && Array.isArray(content?.blocks)
-      ? JSON.stringify(content, null, 2)
-      : content || '';
-
+  const formatContent = (content: any): string => {
+    if (
+      typeof content === 'object' &&
+      content !== null &&
+      Array.isArray(content.blocks) &&
+      content.blocks.length > 0
+    ) {
+      return JSON.stringify(content, null, 2);
+    }
+  
+    return typeof content === 'string' ? content : '';
+  };
 
   const updateHistory = (updatedTodos: TodoItem[]) => {
     setHistory((prevHistory) => [
