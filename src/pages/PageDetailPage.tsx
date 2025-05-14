@@ -51,7 +51,7 @@ const PageDetailPage: React.FC = () => {
           try {
             const cachedContent = JSON.parse(cachedContentString);
             if (cachedContent && cachedContent.blocks &&
-                JSON.stringify(cachedContent) !== JSON.stringify(currentPage.content)) {
+              JSON.stringify(cachedContent) !== JSON.stringify(currentPage.content)) {
               console.log("Restoring content from cache and attempting to update store (potential save):", cachedContent);
               updatePage(currentPage.id, { content: cachedContent })
                 .then(() => {
@@ -129,7 +129,7 @@ const PageDetailPage: React.FC = () => {
             console.error('Error auto-saving content:', err);
             toast.error('Auto-save failed. Changes are still cached locally.');
           }
-        }, 3000); // Auto-save to backend after 5 seconds of inactivity (post-editor-debounce)
+        }, 5000); // Auto-save to backend after 5 seconds of inactivity (post-editor-debounce)
       }
     },
     [currentPage, updatePage, isAutoSave, contentData] // contentData added to deps if currentPage.content is used in check
@@ -177,11 +177,11 @@ const PageDetailPage: React.FC = () => {
   const handleTogglePinPage = async () => {
     if (!currentPage) return;
     try {
-        await togglePinPage(currentPage.id);
-        // currentPage might not be updated yet from the store, so check the opposite of current state for message
-        toast.success(currentPage.is_pinned ? 'Page unpinned!' : 'Page pinned!');
+      await togglePinPage(currentPage.id);
+      // currentPage might not be updated yet from the store, so check the opposite of current state for message
+      toast.success(currentPage.is_pinned ? 'Page unpinned!' : 'Page pinned!');
     } catch (err) {
-        toast.error('Failed to toggle pin status.');
+      toast.error('Failed to toggle pin status.');
     }
   };
 
@@ -246,122 +246,120 @@ const PageDetailPage: React.FC = () => {
     // <Toaster position="bottom-right" />
     <div className="flex flex-col h-screen max-w-5xl mx-auto">
       {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-start gap-4 mx-12 mt-12 mb-6">
-          <div className="flex-1">
-            {isEditingTitle ? (
-              <div className="flex gap-2 items-center">
-                <Input
-                  value={title}
-                  onChange={handleTitleChange}
-                  className="text-2xl font-bold py-2 flex-grow"
-                  autoFocus
-                  onBlur={handleTitleSubmit}
-                  onKeyDown={(e) => e.key === 'Enter' && handleTitleSubmit()}
-                />
-                <Button onClick={handleTitleSubmit} disabled={isSavingTitle} size="sm">
-                  {isSavingTitle ? <Spinner size="sm" /> : 'Save'}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setTitle(currentPage.title);
-                    setIsEditingTitle(false);
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <h1
-                className="text-3xl font-bold text-slate-800 cursor-pointer hover:bg-slate-100 px-2 py-1 rounded -ml-2"
-                onClick={() => setIsEditingTitle(true)}
-                title="Click to edit title"
+      <div className="flex flex-col md:flex-row md:items-start gap-4 mx-6 mt-8">
+        <div className="flex-1">
+          {isEditingTitle ? (
+            <div className="flex gap-2 items-center">
+              <Input
+                value={title}
+                onChange={handleTitleChange}
+                className="text-2xl font-bold py-2 flex-grow"
+                autoFocus
+                onBlur={handleTitleSubmit}
+                onKeyDown={(e) => e.key === 'Enter' && handleTitleSubmit()}
+              />
+              <Button onClick={handleTitleSubmit} disabled={isSavingTitle} size="sm">
+                {isSavingTitle ? <Spinner size="sm" /> : 'Save'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setTitle(currentPage.title);
+                  setIsEditingTitle(false);
+                }}
               >
-                {currentPage.title}
-              </h1>
-            )}
-            <div className="text-xs text-slate-500 mt-1 pl-2">
-              <span>Created: {formatDateTime(currentPage.created_at)}</span>
-              {currentPage.updated_at !== currentPage.created_at && (
-                <span className="ml-3">
-                  Updated: {formatDateTime(currentPage.updated_at)}
-                </span>
-              )}
+                Cancel
+              </Button>
             </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            {currentPage.type === 'note' && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsAutoSave(!isAutoSave)}
-                  className="text-xs px-2 py-1.5"
-                  title={isAutoSave ? "Disable automatic saving to server (still caches locally)" : "Enable automatic saving to server"}
-                >
-                  {isAutoSave ? 'Auto-Save: ON' : 'Auto-Save: OFF'}
-                </Button>
-
-                {!isAutoSave && (
-                  <Button
-                    variant="primary"
-                    onClick={handleManualSave}
-                    disabled={isSavingContent}
-                    className="p-2 flex items-center justify-center w-[36px] h-[36px]" // Fixed size for consistency
-                    title="Save Changes Manually"
-                  >
-                    {isSavingContent ? <Spinner size="sm" /> : <Save size={16} />}
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  onClick={toggleEditMode}
-                  className="p-2"
-                  title={isReadOnly ? 'Enable Editing' : 'Switch to View Mode'}
-                >
-                  {isReadOnly ? <Edit size={16} /> : <Eye size={16} />}
-                </Button>
-              </>
+          ) : (
+            <h1
+              className="text-3xl font-bold text-slate-800 cursor-pointer hover:bg-slate-100 px-2 py-1 rounded -ml-2"
+              onClick={() => setIsEditingTitle(true)}
+              title="Click to edit title"
+            >
+              {currentPage.title}
+            </h1>
+          )}
+          <div className="text-xs text-slate-500 mt-1 pl-2">
+            <span>Created: {formatDateTime(currentPage.created_at)}</span>
+            {currentPage.updated_at !== currentPage.created_at && (
+              <span className="ml-3">
+                Updated: {formatDateTime(currentPage.updated_at)}
+              </span>
             )}
-
-            <Button
-              variant="outline"
-              onClick={handleTogglePinPage}
-              className={`p-2 ${currentPage.is_pinned ? 'text-amber-600 hover:text-amber-700 bg-amber-50' : 'text-slate-600 hover:text-slate-800'}`}
-              title={currentPage.is_pinned ? 'Unpin this page' : 'Pin this page'}
-            >
-              <Pin size={16} />
-            </Button>
-
-            <Button
-              variant="danger"
-              className="p-2 text-white"
-              onClick={() => setShowDeleteConfirm(true)}
-              title="Delete this page"
-            >
-              <Trash2 size={16} />
-            </Button>
           </div>
         </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          {currentPage.type === 'note' && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setIsAutoSave(!isAutoSave)}
+                className="text-xs px-2 py-1.5"
+                title={isAutoSave ? "Disable automatic saving to server (still caches locally)" : "Enable automatic saving to server"}
+              >
+                {isAutoSave ? 'Auto-Save: ON' : 'Auto-Save: OFF'}
+              </Button>
+
+              {!isAutoSave && (
+                <Button
+                  variant="primary"
+                  onClick={handleManualSave}
+                  disabled={isSavingContent}
+                  className="p-2 flex items-center justify-center w-[36px] h-[36px]" // Fixed size for consistency
+                  title="Save Changes Manually"
+                >
+                  {isSavingContent ? <Spinner size="sm" /> : <Save size={16} />}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                onClick={toggleEditMode}
+                className="p-2"
+                title={isReadOnly ? 'Enable Editing' : 'Switch to View Mode'}
+              >
+                {isReadOnly ? <Edit size={16} /> : <Eye size={16} />}
+              </Button>
+            </>
+          )}
+
+          <Button
+            variant="outline"
+            onClick={handleTogglePinPage}
+            className={`p-2 ${currentPage.is_pinned ? 'text-amber-600 hover:text-amber-700 bg-amber-50' : 'text-slate-600 hover:text-slate-800'}`}
+            title={currentPage.is_pinned ? 'Unpin this page' : 'Pin this page'}
+          >
+            <Pin size={16} />
+          </Button>
+
+          <Button
+            variant="danger"
+            className="p-2 text-white"
+            onClick={() => setShowDeleteConfirm(true)}
+            title="Delete this page"
+          >
+            <Trash2 size={16} />
+          </Button>
+        </div>
+      </div>
 
       {/* Content Section - Scrollable */}
       <div className="flex-1 overflow-y-auto">
         <div className="px-4 py-6 h-full">
           {currentPage.type === 'note' ? (
             <div className="bg-white rounded-lg border border-slate-200 p-4 md:p-6 h-full">
-              { contentData && <BlockEditor
+              {contentData && <BlockEditor
                 key={`${currentPage.id}-${isReadOnly}`}
                 data={contentData}
                 onChange={handleEditorChange}
                 readOnly={isReadOnly}
                 autoSave={isAutoSave}
-              /> }
+              />}
             </div>
           ) : (
-            <div className="bg-white rounded-lg border border-slate-200 p-4 md:p-6 h-full">
-              <TodoList pageId={currentPage.id} />
-            </div>
+            <TodoList pageId={currentPage.id} />
           )}
         </div>
       </div>
