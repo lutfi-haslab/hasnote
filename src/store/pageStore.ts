@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { Page, PageType } from '../types';
 import { getDB, addToSyncQueue } from '../lib/db';
+import toast from 'react-hot-toast';
 
 type PagesState = {
   pages: Page[];
@@ -268,7 +269,7 @@ export const usePageStore = create<PagesState>((set, get) => ({
       }
 
       // Add to sync queue
-      await addToSyncQueue('update', 'pages', { id: pageId, ...updatedPage });
+      await addToSyncQueue('update', 'pages', { ...updatedPage });
 
       // Try to sync with Supabase if online
       if (navigator.onLine) {
@@ -279,6 +280,8 @@ export const usePageStore = create<PagesState>((set, get) => ({
 
         if (error) throw error;
       }
+
+      toast.success('Changes saved successfully!');
     } catch (error: any) {
       console.error('Error updating page:', error);
       set({ error: error.message || 'Failed to update page' });

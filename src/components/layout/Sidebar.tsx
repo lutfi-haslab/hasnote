@@ -287,10 +287,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen }) => {
     }
   };
 
-  useEffect(() => {
-    console.log('Current pinnedOrder:', pinnedOrder);
-    console.log('Sorted pinned pages:', sortedPinnedPages);
-  }, [pinnedOrder, sortedPinnedPages]);
+  // useEffect(() => {
+  //   console.log('Current pinnedOrder:', pinnedOrder);
+  //   console.log('Sorted pinned pages:', sortedPinnedPages);
+  // }, [pinnedOrder, sortedPinnedPages]);
 
   const handleCreatePage = async () => {
     setIsCreatingPage(true);

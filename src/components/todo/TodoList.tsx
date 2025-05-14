@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Check,
   ChevronDown,
@@ -16,13 +16,15 @@ import {
   CalendarDays,
   ArrowUp,
   ArrowDown,
+  List,
+  ListOrdered,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { TodoItem } from '../../types';
-import { formatShortDateTime } from '../../lib/utils';
-import Spinner from '../ui/Spinner';
-import BlockEditor from '../editor/BlockEditor';
-import { getDB, addToSyncQueue } from '../../lib/db';
+import { TodoItem } from '../../types'; // Ensure this path is correct
+import { formatShortDateTime } from '../../lib/utils'; // Ensure this path is correct
+import Spinner from '../ui/Spinner'; // Ensure this path is correct
+import { getDB, addToSyncQueue } from '../../lib/db'; // Ensure this path is correct
+import toast from 'react-hot-toast';
 
 type TodoListProps = {
   pageId: string;
@@ -40,73 +42,119 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
   const [newTodoText, setNewTodoText] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [editNotesText, setEditNotesText] = useState(''); // New state for notes textarea
+
   const [history, setHistory] = useState<TodoHistory[]>([]);
   const [canUndo, setCanUndo] = useState(false);
+  
   const [expandedTodos, setExpandedTodos] = useState<Set<string>>(new Set());
   const [fullNotesTodos, setFullNotesTodos] = useState<Set<string>>(new Set());
-  const [contentHeights, setContentHeights] = useState<Record<string, number>>(
-    {}
-  );
-  
-  // Pagination state
+  const notesViewRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [showFullNotesButton, setShowFullNotesButton] = useState<Record<string, boolean>>({});
+
+
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(5);
   
-  // Sorting state
-  const [sortBy, setSortBy] = useState<'created_at'|'updated_at'>('created_at');
+  const [sortBy, setSortBy] = useState<'created_at' | 'updated_at'>('created_at');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   
   const editInputRef = useRef<HTMLInputElement>(null);
-  const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const editNotesAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Initialize history when todos first load
+
+  const updateHistory = (updatedTodos: TodoItem[]) => {
+    setHistory((prevHistory) => [
+      ...prevHistory,
+      { todos: JSON.parse(JSON.stringify(updatedTodos)), timestamp: Date.now() },
+    ]);
+  };
+
   useEffect(() => {
     if (todos.length > 0 && history.length === 0) {
-      setHistory([
-        { todos: JSON.parse(JSON.stringify(todos)), timestamp: Date.now() },
-      ]);
+      setHistory([{ todos: JSON.parse(JSON.stringify(todos)), timestamp: Date.now() }]);
     }
   }, [todos, history.length]);
 
-  // Focus input when editing starts
   useEffect(() => {
     if (editingTodoId && editInputRef.current) {
       editInputRef.current.focus();
     }
   }, [editingTodoId]);
 
+  const fetchTodos = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const db = await getDB();
+      const cachedTodos = await db.getAllFromIndex('todos', 'by-page', pageId);
+      
+      if (cachedTodos.length > 0) {
+        setTodos(cachedTodos as TodoItem[]);
+        setLoading(false); // Show cached data quickly
+      }
+
+      const { data, error: supabaseError } = await supabase
+        .from('todo_items')
+        .select('*')
+        .eq('page_id', pageId)
+        .order(sortBy, { ascending: sortDirection === 'asc' });
+
+      if (supabaseError) throw supabaseError;
+
+      const fetchedTodos = data as TodoItem[];
+      setTodos(fetchedTodos);
+
+      const tx = db.transaction('todos', 'readwrite');
+      await Promise.all([
+        ...fetchedTodos.map((todo) => tx.store.put(todo)),
+        tx.done,
+      ]);
+    } catch (err: any) {
+      console.error('Error fetching todos:', err);
+      setError(err.message || 'Failed to fetch todos');
+    } finally {
+      setLoading(false);
+    }
+  }, [pageId, sortBy, sortDirection]);
+
   useEffect(() => {
     fetchTodos();
-  }, [pageId]);
+  }, [fetchTodos]);
 
-  // Track history changes to set undo availability
   useEffect(() => {
     setCanUndo(history.length > 1);
   }, [history]);
 
-  // Check content heights after rendering
+  // Check if "Show full notes" button is needed
   useEffect(() => {
-    // Use a timeout to ensure DOM is fully rendered
-    const timeoutId = setTimeout(() => {
-      const newHeights: Record<string, number> = {};
-      Object.keys(contentRefs.current).forEach((todoId) => {
-        if (contentRefs.current[todoId]) {
-          newHeights[todoId] = contentRefs.current[todoId]?.scrollHeight || 0;
+    const newShowFullNotesButton: Record<string, boolean> = {};
+    currentTodos.forEach(todo => {
+      if (expandedTodos.has(todo.id) && !fullNotesTodos.has(todo.id)) {
+        const notesViewDiv = notesViewRefs.current[todo.id];
+        if (notesViewDiv && notesViewDiv.scrollHeight > notesViewDiv.clientHeight) {
+          newShowFullNotesButton[todo.id] = true;
+        } else {
+          newShowFullNotesButton[todo.id] = false;
         }
-      });
-      setContentHeights(newHeights);
-    }, 100);
-
-    return () => clearTimeout(timeoutId);
-  }, [expandedTodos, todos]);
+      }
+    });
+    setShowFullNotesButton(newShowFullNotesButton);
+  }, [expandedTodos, fullNotesTodos, todos]); // Re-run if currentTodos changes
 
   const toggleTodoExpand = (id: string) => {
     setExpandedTodos((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(id)) {
         newSet.delete(id);
+        setFullNotesTodos(current => { // Also collapse full notes view
+          const newFullSet = new Set(current);
+          newFullSet.delete(id);
+          return newFullSet;
+        });
       } else {
         newSet.add(id);
       }
@@ -126,303 +174,246 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
     });
   };
 
-  const fetchTodos = async () => {
-    try {
-      const db = await getDB();
-      setLoading(true);
-      setError(null);
-
-      // Try to get from IndexedDB first
-      const cachedTodos = await db.getAllFromIndex('todos', 'by-page', pageId);
-      if (cachedTodos.length > 0) {
-        setTodos(cachedTodos);
-        setLoading(false);
-      }
-
-      // Then try to get from Supabase
-      const { data, error } = await supabase
-        .from('todo_items')
-        .select('*')
-        .eq('page_id', pageId)
-        .order('created_at');
-
-      if (error) throw error;
-
-      setTodos(data as TodoItem[]);
-
-      // Update cache
-      const tx = db.transaction('todos', 'readwrite');
-      await Promise.all([...data.map((todo) => tx.store.put(todo)), tx.done]);
-    } catch (error: any) {
-      console.error('Error fetching todos:', error);
-      setError(error.message || 'Failed to fetch todos');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleCreateTodo = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!newTodoText.trim()) return;
+
+    const optimisticTodo: TodoItem = {
+      id: crypto.randomUUID(),
+      text: newTodoText.trim(),
+      completed: false,
+      page_id: pageId,
+      content: '', // Initialize notes as empty string
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const previousTodos = todos;
+    setTodos((prev) => [optimisticTodo, ...prev]);
+    updateHistory([optimisticTodo, ...previousTodos]);
+    setNewTodoText('');
+    setCurrentPage(1); // Reset to first page
 
     try {
       const db = await getDB();
-      const newTodo = {
-        id: crypto.randomUUID(),
-        text: newTodoText.trim(),
-        completed: false,
-        page_id: pageId,
-        content: {},
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+      await db.add('todos', optimisticTodo);
+      await addToSyncQueue('create', 'todos', optimisticTodo);
 
-      // Update local state immediately
-      setTodos((prev) => [newTodo, ...prev]);
-      setNewTodoText('');
-
-      // Store in IndexedDB
-      await db.add('todos', newTodo);
-
-      // Add to sync queue
-      await addToSyncQueue('create', 'todos', newTodo);
-
-      // Try to sync with Supabase
       if (navigator.onLine) {
-        const { data, error } = await supabase
+        const { data, error: supabaseError } = await supabase
           .from('todo_items')
-          .insert(newTodo)
+          .insert(optimisticTodo)
           .select()
           .single();
 
-        if (error) throw error;
+        if (supabaseError) throw supabaseError;
+        // Optionally update local todo with data from supabase if it differs (e.g., db-generated fields)
+        setTodos(prev => prev.map(t => t.id === optimisticTodo.id ? data as TodoItem : t));
       }
-      
-      // Reset to first page when adding a new todo
-      setCurrentPage(1);
-    } catch (error: any) {
-      console.error('Error creating todo:', error);
-      setError(error.message || 'Failed to create todo');
+      toast.success('Todo Created!');
+    } catch (err: any) {
+      console.error('Error creating todo:', err);
+      setError(err.message || 'Failed to create todo');
+      setTodos(previousTodos); // Rollback optimistic update
+      updateHistory(previousTodos);
     }
   };
 
   const handleToggleComplete = async (todoId: string) => {
     const todoToUpdate = todos.find((todo) => todo.id === todoId);
-
     if (!todoToUpdate) return;
+
+    const updatedTodo = {
+      ...todoToUpdate,
+      completed: !todoToUpdate.completed,
+      updated_at: new Date().toISOString(),
+    };
+
+    const previousTodos = todos;
+    setTodos(todos.map((todo) => (todo.id === todoId ? updatedTodo : todo)));
+    updateHistory(todos.map((todo) => (todo.id === todoId ? updatedTodo : todo)));
+
 
     try {
       const db = await getDB();
-      const updatedTodo = {
-        ...todoToUpdate,
-        completed: !todoToUpdate.completed,
-        updated_at: new Date().toISOString(),
-      };
-
-      // Update local state
-      setTodos(todos.map((todo) => (todo.id === todoId ? updatedTodo : todo)));
-
-      // Update IndexedDB
       await db.put('todos', updatedTodo);
-
-      // Add to sync queue
       await addToSyncQueue('update', 'todos', updatedTodo);
 
-      // Try to sync with Supabase
       if (navigator.onLine) {
-        const { error } = await supabase
+        const { error: supabaseError } = await supabase
           .from('todo_items')
-          .update(updatedTodo)
+          .update({ completed: updatedTodo.completed, updated_at: updatedTodo.updated_at })
           .eq('id', todoId);
-
-        if (error) throw error;
+        if (supabaseError) throw supabaseError;
       }
-    } catch (error: any) {
-      console.error('Error updating todo:', error);
-      setError(error.message || 'Failed to update todo');
+      toast.success('Changes saved successfully!');
+    } catch (err: any) {
+      console.error('Error updating todo:', err);
+      setError(err.message || 'Failed to update todo');
+      setTodos(previousTodos); // Rollback
+      updateHistory(previousTodos);
     }
   };
-
-  const handleEditorChange = async (todoId: string, data: any) => {
-    const todoToUpdate = todos.find((todo) => todo.id === todoId);
-
-    if (!todoToUpdate) return;
-
-    try {
-      const db = await getDB();
-      const updatedTodo = {
-        ...todoToUpdate,
-        content: data,
-        updated_at: new Date().toISOString(),
-      };
-
-      // Update local state
-      setTodos(todos.map((todo) => (todo.id === todoId ? updatedTodo : todo)));
-
-      // Update IndexedDB
-      await db.put('todos', updatedTodo);
-
-      // Add to sync queue
-      await addToSyncQueue('update', 'todos', updatedTodo);
-
-      // Try to sync with Supabase
-      if (navigator.onLine) {
-        const { error } = await supabase
-          .from('todo_items')
-          .update(updatedTodo)
-          .eq('id', todoId);
-
-        if (error) throw error;
-      }
-    } catch (error: any) {
-      console.error('Error updating todo content:', error);
-      setError(error.message || 'Failed to update todo content');
-    }
-  };
-
+  
   const handleStartEdit = (todo: TodoItem) => {
     setEditingTodoId(todo.id);
     setEditText(todo.text);
+    setEditNotesText(todo.content || ''); // Populate notes for textarea
   };
 
   const handleCancelEdit = () => {
     setEditingTodoId(null);
     setEditText('');
+    setEditNotesText(''); // Clear notes
   };
 
   const handleSaveEdit = async (todoId: string) => {
-    if (
-      !editText.trim() ||
-      editText.trim() === todos.find((t) => t.id === todoId)?.text
-    ) {
+    const originalTodo = todos.find((t) => t.id === todoId);
+    if (!originalTodo) return;
+
+    const newText = editText.trim();
+    const newNotes = editNotesText.trim(); // Get notes from state
+
+    if (newText === originalTodo.text && newNotes === (originalTodo.content || '')) {
       handleCancelEdit();
       return;
     }
+    if (!newText) { // Do not allow empty todo text
+        setError("Task text cannot be empty.");
+        if (editInputRef.current) editInputRef.current.focus();
+        return;
+    }
+    setError(null);
+
+
+    const updatedTodo: TodoItem = {
+      ...originalTodo,
+      text: newText,
+      content: newNotes, // Save notes
+      updated_at: new Date().toISOString(),
+    };
+    
+    const previousTodos = todos;
+    setTodos(todos.map((todo) => (todo.id === todoId ? updatedTodo : todo)));
+    updateHistory(todos.map((todo) => (todo.id === todoId ? updatedTodo : todo)));
+    handleCancelEdit();
 
     try {
       const db = await getDB();
-      const todoToUpdate = todos.find((todo) => todo.id === todoId);
-      if (!todoToUpdate) return;
-
-      const updatedTodo = {
-        ...todoToUpdate,
-        text: editText.trim(),
-        updated_at: new Date().toISOString(),
-      };
-
-      // Update local state
-      setTodos(todos.map((todo) => (todo.id === todoId ? updatedTodo : todo)));
-
-      // Update IndexedDB
       await db.put('todos', updatedTodo);
-
-      // Add to sync queue
       await addToSyncQueue('update', 'todos', updatedTodo);
 
-      // Try to sync with Supabase
       if (navigator.onLine) {
-        const { error } = await supabase
+        const { error: supabaseError } = await supabase
           .from('todo_items')
-          .update(updatedTodo)
+          .update({ text: updatedTodo.text, content: updatedTodo.content, updated_at: updatedTodo.updated_at })
           .eq('id', todoId);
-
-        if (error) throw error;
+        if (supabaseError) throw supabaseError;
       }
-
-      handleCancelEdit();
-    } catch (error: any) {
-      console.error('Error updating todo text:', error);
-      setError(error.message || 'Failed to update todo text');
+      toast.success('Changes saved successfully!');
+    } catch (err: any) {
+      console.error('Error updating todo text/notes:', err);
+      setError(err.message || 'Failed to update todo');
+      setTodos(previousTodos); // Rollback
+      updateHistory(previousTodos);
     }
   };
 
   const handleDeleteTodo = async (todoId: string) => {
+    const previousTodos = todos;
+    setTodos(todos.filter((todo) => todo.id !== todoId));
+    updateHistory(todos.filter((todo) => todo.id !== todoId));
+
+    // Adjust pagination if needed
+    const newTotalItems = todos.length - 1;
+    if (newTotalItems % itemsPerPage === 0 && currentPage > newTotalItems / itemsPerPage && currentPage > 1) {
+        setCurrentPage(prev => prev -1);
+    }
+
+
     try {
       const db = await getDB();
-      // Update local state
-      setTodos(todos.filter((todo) => todo.id !== todoId));
-
-      // Remove from IndexedDB
       await db.delete('todos', todoId);
-
-      // Add to sync queue
       await addToSyncQueue('delete', 'todos', { id: todoId });
+      toast.error('Todo Deleted!');
 
-      // Try to sync with Supabase
       if (navigator.onLine) {
-        const { error } = await supabase
-          .from('todo_items')
-          .delete()
-          .eq('id', todoId);
-
-        if (error) throw error;
+        const { error: supabaseError } = await supabase.from('todo_items').delete().eq('id', todoId);
+        if (supabaseError) throw supabaseError;
       }
-      
-      // If we deleted the last item on the current page, go back a page
-      const totalPages = Math.ceil((todos.length - 1) / itemsPerPage);
-      if (currentPage > totalPages && currentPage > 1) {
-        setCurrentPage(totalPages);
-      }
-    } catch (error: any) {
-      console.error('Error deleting todo:', error);
-      setError(error.message || 'Failed to delete todo');
+    } catch (err: any) {
+      console.error('Error deleting todo:', err);
+      setError(err.message || 'Failed to delete todo');
+      setTodos(previousTodos); // Rollback
+      updateHistory(previousTodos);
     }
   };
 
   const handleUndo = async () => {
     if (history.length <= 1) return;
 
+    const newHistory = [...history];
+    newHistory.pop(); // Remove current state
+    const previousState = newHistory[newHistory.length - 1];
+    
+    setHistory(newHistory);
+    setTodos(previousState.todos); // Optimistic UI update
+
     try {
-      const db = await getDB();
-      // Get the previous state
-      const newHistory = [...history];
-      newHistory.pop(); // Remove current state
-      const previousState = newHistory[newHistory.length - 1];
+        const db = await getDB();
+        const tx = db.transaction('todos', 'readwrite');
+        // First, clear existing todos for this pageId from IDB to handle deletions correctly
+        const existingPageTodos = await db.getAllFromIndex('todos', 'by-page', pageId);
+        for (const et of existingPageTodos) {
+            if (!previousState.todos.find(pt => pt.id === et.id)) {
+                await tx.store.delete(et.id);
+            }
+        }
+        // Then, put all todos from the undone state
+        for (const todo of previousState.todos) {
+            if (todo.page_id === pageId) { // Ensure we only affect current page's todos
+                 await tx.store.put(todo);
+            }
+        }
+        await tx.done;
+        
+        // Add to sync queue (could be complex, might need to sync entire state or diffs)
+        // For simplicity, just re-fetch or mark for full sync
+        // @ts-ignore
+        await addToSyncQueue('replace_all_for_page', 'todos', { page_id: pageId, todos: previousState.todos });
 
-      // Update UI immediately (optimistic update)
-      setHistory(newHistory);
-      setTodos(previousState.todos);
 
-      // Sync with IndexedDB
-      const tx = db.transaction('todos', 'readwrite');
-      await Promise.all([
-        ...previousState.todos.map((todo) => tx.store.put(todo)),
-        tx.done,
-      ]);
-
-      // Add to sync queue
-      await addToSyncQueue('update', 'todos', previousState.todos);
-
-      // Try to sync with Supabase
       if (navigator.onLine) {
-        await fetchTodos();
+        // This could be a batch update to Supabase to reflect the undone state.
+        // For simplicity here, we can trigger a re-fetch, or ideally, send batch updates.
+        // Example: Delete todos not in previousState, update/insert others.
+        // This is complex, so a full re-fetch might be a pragmatic first step.
+        await fetchTodos(); 
       }
-    } catch (error: any) {
-      console.error('Error performing undo:', error);
-      setError(error.message || 'Failed to undo');
+    } catch (err: any) {
+      console.error('Error performing undo:', err);
+      setError(err.message || 'Failed to undo');
+      // Potentially roll back the undo if DB operations fail significantly
+      setHistory(prevHistory => [...prevHistory, {todos: todos, timestamp: Date.now()}]); // Rollback history
+      setTodos(history[history.length-1].todos) // Rollback todos
     }
   };
 
   const shouldShowExpandButton = (todo: TodoItem) => {
-    return todo.content?.blocks?.length > 0;
+    return todo.content;
   };
   
-  // Sort todos based on current sort settings
   const sortedTodos = [...todos].sort((a, b) => {
-    const dateA = new Date(a[sortBy]).getTime();
-    const dateB = new Date(b[sortBy]).getTime();
-    
-    return sortDirection === 'asc' ? dateA - dateB : dateB - dateA;
+    const valA = a[sortBy] ? new Date(a[sortBy]!).getTime() : 0;
+    const valB = b[sortBy] ? new Date(b[sortBy]!).getTime() : 0;
+    return sortDirection === 'asc' ? valA - valB : valB - valA;
   });
   
-  // Calculate pagination
-  const totalPages = Math.ceil(sortedTodos.length / itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(sortedTodos.length / itemsPerPage));
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentTodos = sortedTodos.slice(indexOfFirstItem, indexOfLastItem);
   
-  // Page navigation
   const goToPage = (pageNumber: number) => {
     setCurrentPage(Math.max(1, Math.min(pageNumber, totalPages)));
   };
@@ -436,11 +427,63 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
       toggleSortDirection();
     } else {
       setSortBy(field);
-      setSortDirection('desc'); // Default to newest first when changing fields
+      setSortDirection('desc');
     }
   };
 
-  if (loading) {
+  // Helper to render notes string with list support
+  const renderNotesWithLists = (notes: string | undefined) => {
+    if (!notes) return null;
+    const lines = notes.split('\n');
+    const elements: JSX.Element[] = [];
+    let currentListType: 'ul' | 'ol' | null = null;
+    let listItems: JSX.Element[] = [];
+
+    const closeCurrentList = () => {
+      if (currentListType && listItems.length > 0) {
+        if (currentListType === 'ul') {
+          elements.push(<ul key={`ul-${elements.length}`} className="list-disc list-inside pl-4 my-1">{listItems}</ul>);
+        } else {
+          elements.push(<ol key={`ol-${elements.length}`} className="list-decimal list-inside pl-4 my-1">{listItems}</ol>);
+        }
+      }
+      listItems = [];
+      currentListType = null;
+    };
+
+    lines.forEach((line, index) => {
+      const unorderedMatch = line.match(/^(\s*)(?:[-*]|\u2022)\s+(.*)/); // Support spaces before -, *
+      const orderedMatch = line.match(/^(\s*)(\d+)\.\s+(.*)/); // Support spaces before 1.
+
+      if (unorderedMatch) {
+        if (currentListType !== 'ul') {
+          closeCurrentList();
+          currentListType = 'ul';
+        }
+        listItems.push(<li key={`li-${index}`} className="mb-0.5">{unorderedMatch[2]}</li>);
+      } else if (orderedMatch) {
+        if (currentListType !== 'ol') {
+          closeCurrentList();
+          currentListType = 'ol';
+        }
+        listItems.push(<li key={`li-${index}`} className="mb-0.5">{orderedMatch[3]}</li>);
+      } else {
+        closeCurrentList();
+        if (line.trim() !== '') {
+          elements.push(<p key={`p-${index}`} className="my-1">{line}</p>);
+        } else {
+          // Preserve empty lines between paragraphs essentially as a <br> effect if desired
+          // Or simply push a placeholder that results in some space, or ignore.
+           elements.push(<br key={`br-${index}`} />); 
+        }
+      }
+    });
+    closeCurrentList(); // Ensure any trailing list is closed
+    return elements;
+  };
+
+
+  if (loading && todos.length === 0) { // Only show full page spinner if no data yet
     return (
       <div className="flex justify-center py-8">
         <Spinner />
@@ -469,47 +512,41 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
   return (
     <div className="py-6">
       <div className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white">
+        {/* Header */}
         <div className="flex justify-between items-center px-5 py-3 bg-gradient-to-r from-blue-50 to-slate-50 border-b border-slate-200">
           <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-            <Clock size={18} className="text-blue-500" />
+            <List size={18} className="text-blue-500" />
             Tasks
             <span className="text-xs font-normal text-slate-500">
               ({todos.length} {todos.length === 1 ? 'item' : 'items'})
             </span>
           </h3>
-          
           <div className="flex items-center gap-2">
             <div className="flex text-xs">
+              {/* Sort Buttons */}
               <button 
                 onClick={() => changeSortField('created_at')} 
                 className={`px-2 py-1 border border-r-0 rounded-l-md flex items-center gap-1 ${
                   sortBy === 'created_at' 
                     ? 'bg-blue-100 border-blue-300 text-blue-800' 
-                    : 'bg-slate-50 border-slate-200 text-slate-600'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                <CalendarDays size={12} />
-                Date created
-                {sortBy === 'created_at' && (
-                  sortDirection === 'desc' ? <ArrowDown size={12} /> : <ArrowUp size={12} />
-                )}
+                <CalendarDays size={12} /> Created
+                {sortBy === 'created_at' && (sortDirection === 'desc' ? <ArrowDown size={12} /> : <ArrowUp size={12} />)}
               </button>
               <button 
                 onClick={() => changeSortField('updated_at')} 
                 className={`px-2 py-1 border rounded-r-md flex items-center gap-1 ${
                   sortBy === 'updated_at' 
                     ? 'bg-blue-100 border-blue-300 text-blue-800' 
-                    : 'bg-slate-50 border-slate-200 text-slate-600'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                <RefreshCw size={12} />
-                Last updated
-                {sortBy === 'updated_at' && (
-                  sortDirection === 'desc' ? <ArrowDown size={12} /> : <ArrowUp size={12} />
-                )}
+                <RefreshCw size={12} /> Updated
+                {sortBy === 'updated_at' && (sortDirection === 'desc' ? <ArrowDown size={12} /> : <ArrowUp size={12} />)}
               </button>
             </div>
-            
             {canUndo && (
               <button
                 onClick={handleUndo}
@@ -522,7 +559,7 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
           </div>
         </div>
         
-        {/* Add task form - always visible at the top */}
+        {/* Add task form */}
         <form
           onSubmit={handleCreateTodo}
           className="border-b border-slate-200 p-4 bg-slate-50/90 sticky top-0 z-10 shadow-sm"
@@ -546,15 +583,16 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
           </div>
         </form>
 
-        <div className="max-h-[65vh] overflow-y-auto">
+        {/* Todo List Area */}
+        <div className="max-h-[calc(100vh-280px)] min-h-[200px] overflow-y-auto"> {/* Adjusted max-height */}
           <div className="divide-y divide-slate-200">
-            {currentTodos.length === 0 ? (
+            {currentTodos.length === 0 && !loading ? (
               <div className="p-10 text-center text-slate-500 bg-slate-50/50">
                 <div className="inline-flex p-4 rounded-full bg-slate-100 mb-3">
-                  <Plus size={24} className="text-slate-400" />
+                  <ListOrdered size={24} className="text-slate-400" />
                 </div>
-                <p className="font-medium">No items yet</p>
-                <p className="text-sm mt-1">Add your first to-do item above</p>
+                <p className="font-medium">No tasks yet</p>
+                <p className="text-sm mt-1">Add your first task using the form above.</p>
               </div>
             ) : (
               currentTodos.map((todo) => (
@@ -565,6 +603,7 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
                   }`}
                 >
                   <div className="flex items-start gap-3">
+                    {/* Checkbox */}
                     <button
                       onClick={() => handleToggleComplete(todo.id)}
                       className={`w-6 h-6 rounded-full flex-shrink-0 border mt-0.5 flex items-center justify-center transition-colors ${
@@ -576,8 +615,9 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
                       {todo.completed && <Check size={14} />}
                     </button>
 
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0"> {/* Added min-w-0 for better text wrapping */}
                       {editingTodoId === todo.id ? (
+                        // Editing State
                         <div className="flex flex-col gap-3">
                           <div className="flex items-center gap-2">
                             <input
@@ -587,7 +627,8 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
                               onChange={(e) => setEditText(e.target.value)}
                               className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
                               onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
+                                if (e.key === 'Enter' && !e.shiftKey) { // Allow Shift+Enter for newline in textarea
+                                  e.preventDefault();
                                   handleSaveEdit(todo.id);
                                 } else if (e.key === 'Escape') {
                                   handleCancelEdit();
@@ -609,23 +650,23 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
                               <X size={16} />
                             </button>
                           </div>
-
-                          {/* BlockEditor for editing notes */}
-                          <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden p-2">
-                            <BlockEditor
-                              key={`edit-${todo.id}`}
-                              data={todo.content || { blocks: [] }}
-                              onChange={(data) =>
-                                handleEditorChange(todo.id, data)
-                              }
-                            />
-                          </div>
+                          
+                          {/* Textarea for Notes */}
+                          <textarea
+                            ref={editNotesAreaRef}
+                            value={editNotesText}
+                            onChange={(e) => setEditNotesText(e.target.value)}
+                            placeholder="Add notes... (e.g., - item 1, 1. item 2)"
+                            className="w-full min-h-[80px] p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm text-sm"
+                            rows={3}
+                          />
                         </div>
                       ) : (
+                        // Viewing State
                         <div className="flex items-start justify-between">
-                          <div className="flex-1">
+                          <div className="flex-1 min-w-0"> {/* Added min-w-0 */}
                             <p
-                              className={`text-base ${
+                              className={`text-base break-words ${ // Added break-words
                                 todo.completed
                                   ? 'line-through text-slate-500'
                                   : 'text-slate-800 font-medium'
@@ -633,8 +674,7 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
                             >
                               {todo.text}
                             </p>
-
-                            <div className="flex flex-wrap gap-4 mt-2 text-xs text-slate-500">
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-slate-500">
                               <span className="flex items-center gap-1">
                                 <Clock size={12} />
                                 Created: {formatShortDateTime(todo.created_at)}
@@ -648,33 +688,23 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
                             </div>
                           </div>
 
-                          <div className="flex items-center ml-4">
+                          <div className="flex items-center ml-2 sm:ml-4 flex-shrink-0">
                             {shouldShowExpandButton(todo) && (
                               <button
                                 onClick={() => toggleTodoExpand(todo.id)}
                                 className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors"
-                                title={
-                                  expandedTodos.has(todo.id)
-                                    ? 'Hide notes'
-                                    : 'Show notes'
-                                }
+                                title={expandedTodos.has(todo.id) ? 'Hide notes' : 'Show notes'}
                               >
-                                {expandedTodos.has(todo.id) ? (
-                                  <ChevronUp size={16} />
-                                ) : (
-                                  <ChevronDown size={16} />
-                                )}
+                                {expandedTodos.has(todo.id) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                               </button>
                             )}
-                            {editingTodoId !== todo.id && (
-                              <button
-                                onClick={() => handleStartEdit(todo)}
-                                className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors"
-                                title="Edit"
-                              >
-                                <Edit2 size={16} />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => handleStartEdit(todo)}
+                              className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors"
+                              title="Edit"
+                            >
+                              <Edit2 size={16} />
+                            </button>
                             <button
                               onClick={() => handleDeleteTodo(todo.id)}
                               className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
@@ -688,101 +718,87 @@ const TodoList: React.FC<TodoListProps> = ({ pageId }) => {
                     </div>
                   </div>
 
-                  {editingTodoId !== todo.id && expandedTodos.has(todo.id) && (
+                  {/* Display Notes Area (Not in Edit Mode) */}
+                  {editingTodoId !== todo.id && expandedTodos.has(todo.id) && shouldShowExpandButton(todo) && (
                     <div className="mt-4 pl-9">
                       <div
-                        className="relative border border-slate-200 rounded-lg bg-white shadow-sm"
-                        style={{
-                          maxHeight: fullNotesTodos.has(todo.id)
-                            ? 'none'
-                            : '12rem',
-                          overflow: fullNotesTodos.has(todo.id)
-                            ? 'visible'
-                            : 'hidden',
+                        className="relative border border-slate-200 rounded-lg bg-white shadow-inner p-3 text-sm text-slate-700"
+                         style={{
+                          maxHeight: fullNotesTodos.has(todo.id) ? 'none' : '10rem', // 160px
+                          overflowY: 'hidden', // scroll handled by button logic
                         }}
+                        ref={el => notesViewRefs.current[todo.id] = el}
                       >
-                        <div
-                          className="p-2"
-                          ref={(el) => (contentRefs.current[todo.id] = el)}
-                        >
-                          <BlockEditor
-                            key={`view-${todo.id}`}
-                            data={todo.content || { blocks: [] }}
-                            readOnly
-                            onChange={() => {}}
-                          />
+                        <div className="prose prose-sm max-w-none"> {/* Using prose for better typography */}
+                            {renderNotesWithLists(JSON.stringify(todo.content))}
                         </div>
 
-                        {!fullNotesTodos.has(todo.id) && (
-                          <div className="z-[50] absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-white via-white/80 to-transparent flex justify-center items-end">
+                        {!fullNotesTodos.has(todo.id) && showFullNotesButton[todo.id] && (
+                           <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white via-white/90 to-transparent flex justify-center items-end pb-1">
                             <button
-                              className="pointer-events-auto text-sm text-blue-600 hover:text-blue-700 bg-white px-3 py-1.5 rounded-md shadow hover:shadow-md border border-blue-100 transition-all transform hover:-translate-y-0.5"
+                              className="text-xs text-blue-600 hover:text-blue-700 bg-white px-2.5 py-1 rounded-md shadow hover:shadow-md border border-blue-100 transition-all transform hover:-translate-y-0.5"
                               onClick={() => toggleFullNotes(todo.id)}
                             >
                               Show full notes
                             </button>
                           </div>
                         )}
-
-                        {fullNotesTodos.has(todo.id) && (
-                          <div className="z-[50] flex justify-center py-2 border-t border-slate-100">
-                            <button
-                              className="text-sm text-slate-500 hover:text-slate-700 px-3 py-1 flex items-center gap-1"
-                              onClick={() => toggleFullNotes(todo.id)}
-                            >
-                              <ChevronUp size={14} />
-                              Show less
-                            </button>
-                          </div>
-                        )}
                       </div>
+                      {fullNotesTodos.has(todo.id) && (
+                        <div className="flex justify-center pt-2">
+                          <button
+                            className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1 flex items-center gap-1 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200"
+                            onClick={() => toggleFullNotes(todo.id)}
+                          >
+                            <ChevronUp size={12} />
+                            Show less
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               ))
             )}
+             {loading && todos.length > 0 && <div className="p-4 text-center text-sm text-slate-500"> <Spinner size="sm" /> Loading more...</div>}
           </div>
         </div>
         
         {/* Pagination controls */}
         {totalPages > 1 && (
-          <div className="border-t border-slate-200 p-4 bg-slate-50 flex justify-center">
+          <div className="border-t border-slate-200 p-3 bg-slate-50 flex justify-center">
             <div className="flex items-center gap-1">
               <button
                 onClick={() => goToPage(1)}
                 disabled={currentPage === 1}
-                className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:text-slate-300 disabled:hover:bg-transparent"
+                className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:text-slate-300 disabled:hover:bg-transparent" title="First page"
               >
-                <ChevronLeft size={16} className="rotate-90" />
+                <ChevronLeft size={16} className="rotate-90 scale-y-150" /> {/* Custom first page icon */}
               </button>
-              
               <button
                 onClick={() => goToPage(currentPage - 1)}
                 disabled={currentPage === 1}
-                className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:text-slate-300 disabled:hover:bg-transparent"
+                className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:text-slate-300 disabled:hover:bg-transparent" title="Previous page"
               >
                 <ChevronLeft size={16} />
               </button>
-              
-              <span className="px-3 py-1 text-sm">
+              <span className="px-3 py-1 text-xs sm:text-sm">
                 Page <span className="font-medium text-blue-600">{currentPage}</span> of{" "}
                 <span className="font-medium">{totalPages}</span>
               </span>
-              
               <button
                 onClick={() => goToPage(currentPage + 1)}
                 disabled={currentPage === totalPages}
-                className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:text-slate-300 disabled:hover:bg-transparent"
+                className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:text-slate-300 disabled:hover:bg-transparent" title="Next page"
               >
                 <ChevronRight size={16} />
               </button>
-              
               <button
                 onClick={() => goToPage(totalPages)}
                 disabled={currentPage === totalPages}
-                className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:text-slate-300 disabled:hover:bg-transparent"
+                className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:text-slate-300 disabled:hover:bg-transparent" title="Last page"
               >
-                <ChevronRight size={16} className="rotate-90" />
+                 <ChevronRight size={16} className="rotate-90 scale-y-150" /> {/* Custom last page icon */}
               </button>
             </div>
           </div>

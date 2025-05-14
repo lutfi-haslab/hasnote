@@ -1,25 +1,25 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import EditorJS from '@editorjs/editorjs';
+import Quote from '@cychann/editorjs-quote';
+import CodeTool from '@editorjs/code';
+import EditorJS, { LogLevels } from '@editorjs/editorjs';
+import Embed from '@editorjs/embed';
 import Header from '@editorjs/header';
+import LinkTool from '@editorjs/link';
 import EditorjsList from '@editorjs/list';
 import Paragraph from '@editorjs/paragraph';
-import Embed from '@editorjs/embed';
 import Table from '@editorjs/table';
-import LinkTool from '@editorjs/link';
-import { RotateCcw, Save } from 'lucide-react';
-import PageLink from '../pages/PageLink';
 import ColorPicker from 'editorjs-color-picker';
-import Quote from '@cychann/editorjs-quote';
-import ToggleBlock from 'editorjs-toggle-block';
 import DragDrop from 'editorjs-drag-drop';
+import ToggleBlock from 'editorjs-toggle-block';
 import Undo from 'editorjs-undo';
-import CodeTool from '@editorjs/code';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import PageLink from '../pages/PageLink';
 
 type BlockEditorProps = {
   data: any;
   readOnly?: boolean;
   onChange?: (data: any) => void;
   autoSave?: boolean;
+  isTodo?: boolean;
 };
 
 const BlockEditor: React.FC<BlockEditorProps> = ({
@@ -27,14 +27,13 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
   readOnly = false,
   onChange,
   autoSave = false,
+  isTodo = false
 }) => {
-  const editorRef = useRef<EditorJS | null>(null);
+  const editorRef = useRef<EditorJS | any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dataRef = useRef<any>(data);
   const initializedRef = useRef<boolean>(false);
   const [editorKey, setEditorKey] = useState<number>(0);
-  const [hasChanges, setHasChanges] = useState<boolean>(false);
-  const [isSaving, setIsSaving] = useState<boolean>(false);
   const changeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isMobile, setIsMobile] = useState<boolean>(false);
 
@@ -72,51 +71,45 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
     return null;
   };
 
-  // Save handler
-  const handleSave = useCallback(async () => {
-    if (!editorRef.current || !onChange || !hasChanges) return;
 
-    setIsSaving(true);
-    try {
-      const savedData = await editorRef.current.save();
-      dataRef.current = savedData;
-      onChange(savedData);
-      setHasChanges(false);
-    } catch (error) {
-      console.error('Error saving editor data:', error);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [onChange, hasChanges]);
+  useEffect(() => {
+    dataRef.current = data; // Keep dataRef updated if data prop changes from parent
+  }, [data]);
 
-  // Change handler
   const handleChange = useCallback(async () => {
-    if (!editorRef.current) return;
+    if (!editorRef.current || !onChange) return;
 
-    setHasChanges(true);
+    const performSaveOrGetData = async () => {
+      try {
+        const savedData = await editorRef?.current.save();
+        // Only call onChange if data has actually changed significantly
+        // (Editor.js might trigger for minor selection changes etc.)
+        // Deep comparison can be expensive. Stringify is a common approach.
+        if (JSON.stringify(savedData.blocks) !== JSON.stringify(dataRef.current?.blocks)) {
+          dataRef.current = savedData; // Update local ref
+          onChange(savedData); // Propagate change to PageDetailPage
+        } else if (savedData.blocks.length === 0 && (!dataRef.current?.blocks || dataRef.current.blocks.length > 0)){
+          // Handle case where all content is deleted
+          dataRef.current = savedData;
+          onChange(savedData);
+        }
+      } catch (error) {
+        console.error('Error getting editor data for onChange:', error);
+      }
+    };
 
-    if (autoSave && onChange) {
+    if (autoSave) { // This 'autoSave' is the prop passed from PageDetailPage
       if (changeTimeoutRef.current) {
         clearTimeout(changeTimeoutRef.current);
       }
-
-      changeTimeoutRef.current = setTimeout(async () => {
-        setIsSaving(true);
-        try {
-          const savedData = await editorRef.current.save();
-          if (JSON.stringify(savedData) !== JSON.stringify(dataRef.current)) {
-            dataRef.current = savedData;
-            onChange(savedData);
-            setHasChanges(false);
-          }
-        } catch (error) {
-          console.error('Error saving editor data:', error);
-        } finally {
-          setIsSaving(false);
-        }
-      }, 1000);
+      changeTimeoutRef.current = setTimeout(performSaveOrGetData, 1000); // Debounce as before
+    } else {
+      // If BlockEditor's autoSave prop is false (meaning PageDetailPage's isAutoSave is false),
+      // call performSaveOrGetData immediately.
+      // PageDetailPage's handleEditorChange will then decide to only cache it locally.
+      await performSaveOrGetData();
     }
-  }, [onChange, autoSave]);
+  }, [onChange, autoSave, dataRef]); // Added autoSave and dataRef to dependencies
 
   // Initialize editor with mobile-specific settings
   useEffect(() => {
@@ -132,6 +125,7 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
       minHeight: 0,
       tools: {
         header: {
+          // @ts-ignore
           class: Header,
           config: {
             placeholder: 'Enter heading text...',
@@ -141,6 +135,7 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
           inlineToolbar: true,
         },
         list: {
+                 // @ts-ignore
           class: EditorjsList,
           inlineToolbar: true,
           config: {
@@ -148,6 +143,7 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
           },
         },
         paragraph: {
+                 // @ts-ignore
           class: Paragraph,
           inlineToolbar: true,
           config: {
@@ -155,6 +151,7 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
           },
         },
         embed: {
+                 // @ts-ignore
           class: Embed,
           inlineToolbar: true,
           config: {
@@ -165,6 +162,7 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
           },
         },
         table: {
+                 // @ts-ignore
           class: Table,
           inlineToolbar: true,
           config: {
@@ -193,6 +191,7 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
         },
         code: CodeTool,
         color: {
+                 // @ts-ignore
           class: ColorPicker,
           config: {
             colorCollections: [
@@ -210,6 +209,7 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
           },
         },
         quote: {
+                 // @ts-ignore
           class: Quote,
           config: {
             defaultType: 'quotationMark',
@@ -223,8 +223,8 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
       },
       data: validData,
       readOnly,
-      onChange: handleChange,
-      logLevel: 'ERROR',
+      onChange: isTodo ? onChange : handleChange,
+      logLevel: "ERROR" as LogLevels.ERROR,
       onReady: () => {
         new Undo({ editor });
         new DragDrop(editor);
@@ -232,14 +232,12 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
 
         // Mobile-specific adjustments
         if (isMobile) {
-          // Ensure toolbar is visible
           const editorContainer = containerRef.current;
           if (editorContainer) {
             editorContainer.style.position = 'relative';
             editorContainer.style.zIndex = '1';
           }
 
-          // Add touch event listeners to help with toolbar visibility
           document.querySelectorAll('.ce-toolbar').forEach((toolbar) => {
             toolbar.addEventListener('touchstart', (e) => e.stopPropagation());
           });
@@ -293,7 +291,8 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
         const validData = data.blocks ? data : { blocks: [] };
         dataRef.current = validData;
 
-        if (containerRef.current?.childElementCount > 1) {
+        // @ts-ignore
+        if (containerRef?.current?.childElementCount > 1) {
           setEditorKey((prev) => prev + 1);
           return;
         }
@@ -301,7 +300,6 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
         editorRef.current.isReady
           .then(() => {
             editorRef.current?.render(validData);
-            setHasChanges(false);
           })
           .catch(console.error);
       } catch (error) {
@@ -319,30 +317,12 @@ const BlockEditor: React.FC<BlockEditorProps> = ({
 
   return (
     <div className="relative editorjs-container">
-      {!readOnly && !autoSave && (
-        <button
-          onClick={handleSave}
-          disabled={!hasChanges || isSaving}
-          className={`fixed z-50 right-4 bottom-[130px] p-3 rounded-full shadow-lg transition-all ${
-            hasChanges
-              ? 'bg-blue-600 text-white hover:bg-blue-700'
-              : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-          } ${isSaving ? 'animate-pulse' : ''}`}
-          aria-label="Save changes"
-          style={{
-            touchAction: 'manipulation', // Improve touch responsiveness
-          }}
-        >
-          <Save size={20} />
-        </button>
-      )}
-
       <div
         ref={containerRef}
         key={editorKey}
         className="mx-auto max-w-3xl [&_a]:cursor-pointer [&_a]:text-blue-600 [&_a]:underline"
         style={{
-          paddingBottom: isMobile ? '60px' : '0', // Add space for mobile keyboard
+          paddingBottom: isMobile ? '60px' : '0',
         }}
       />
     </div>

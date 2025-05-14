@@ -15,8 +15,8 @@ interface NotionCloneDB extends DBSchema {
   syncQueue: {
     key: number; // Changed from 'any' to 'number' since it's auto-incremented
     value: {
-      id: number;
-      type: 'create' | 'update' | 'delete';
+      id?: number;
+      type: 'create' | 'update' | 'delete' | 'upsert';
       table: 'pages' | 'todos' | 'meta' | 'user_preferences';
       data: any;
       timestamp: Date;
@@ -25,7 +25,7 @@ interface NotionCloneDB extends DBSchema {
   user_preferences: {
     key: string;
     value: {
-      id: string;
+      id?: string;
       value: any;
     };
     indexes: { 'by-id': string };
@@ -64,7 +64,7 @@ let dbPromise = initDB();
 
 // Export functions that use the database promise
 export async function addToSyncQueue(
-  type: 'create' | 'update' | 'delete',
+  type: 'create' | 'update' | 'delete' | 'upsert',
   table: 'pages' | 'todos' | 'meta' | 'user_preferences',
   data: any
 ) {
@@ -87,6 +87,7 @@ export async function processSyncQueue() {
     try {
       // Process sync item
       // Add your Supabase sync logic here
+      // @ts-ignore
       await store.delete(item.id);
     } catch (error) {
       console.error('Sync failed for item:', item, error);
